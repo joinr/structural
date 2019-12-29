@@ -160,6 +160,48 @@ structural.core> (binding [*print-meta* true]
    [x y]          position         
    path-length   (.count path)]
  [hashCode (+ x y)])
+
+;;[2027821082 3]
+#+END_SRC
+
+If we examine the expression's macroexpansion, we can
+see that =with-slots= is dutifully walking the expression,
+resolving types, and destructuring.
+#+BEGIN_SRC clojure  
+structural.core> 
+(def the-expression 
+  '(with-slots
+    [{:fields [^Counted path
+               ^Indexed position]} ^botmove (->botmove [] [1 2])
+     {:keys [a b] :fields [hashCode]}    {:a 2 :b 3}
+     [x y]          position         
+     path-length   (.count path)]
+   [hashCode (+ x y)]))
+
+structural.core> (binding [*print-meta* true] (pprint (macroexpand-1 the-expression)))
+(clojure.core/let
+ [^botmove coll18285
+  (->botmove [] [1 2])
+  ^Counted path
+  (.path ^botmove coll18285)
+  ^Indexed position
+  (.position ^botmove coll18285)
+  ^clojure.lang.IPersistentMap coll18286
+  {:a 2, :b 3}
+  hashCode
+  (.hashCode ^clojure.lang.IPersistentMap coll18286)
+  a
+  (.valAt ^clojure.lang.IPersistentMap coll18286 :a)
+  b
+  (.valAt ^clojure.lang.IPersistentMap coll18286 :b)
+  x
+  (.nth ^Indexed position 0)
+  y
+  (.nth ^Indexed position 1)
+  path-length
+  (.count path)]
+ [hashCode (+ x y)])
+nil
 #+END_SRC
 
 This provides a way to tune performance without deviating too far from
