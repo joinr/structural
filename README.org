@@ -1,10 +1,59 @@
 * structural
 
-A Clojure library designed to ... well, that part is up to you.
+This is a small library that provides macros to help
+convert destructured code into efficient code via type hints.
 
-** Usage
+One of the big problems one runs into in practice is that
+the expressivenss of destructuring - while elegant - typically
+renders inefficient code from the clojure compiler.  The default
+is more generic, polymorphic code.  If we know the types and 
+are willing to hint to optimize for performance, we'd like
+to have clojure just efficiently unpack our structures.
 
-** icfpc.speed/with-slots
+This is particularly important for code that lives on
+a hot loop, where (idiomatic) forms like
+
+#+BEGIN_SRC clojure
+(defn add [[x y]]
+  (+ x y))
+#+END_SRC 
+
+will incur a non-trivial cost in destructuring, as 
+the code will expand to something like...
+#+BEGIN_SRC clojure
+(defn add [xy]
+  (let [x (nth xy 0)
+        y (nth xy 1)]
+    (+ x y))
+#+END_SRC 
+
+where =clojure.core/nth= is polymorphic and has to run through several
+tests to determine what the input is and how to coerce it to 
+an appropriate operation for indexed lookup.
+
+A much faster route would be something like..
+#+BEGIN_SRC clojure
+(defn add [^clojure.lang.Indexed xy]
+  (let [x (.nth xy 0)
+        y (.nth xy 1)]
+    (+ x y))
+#+END_SRC 
+
+wherein we know the type of the input will always be something
+supporting Indexed, thus supporting the =.nth= method, thus something
+we can to the compiler to emit a direct method invocation directly.
+
+For smallish function optimizations, this isn't too bad, but
+it can get hairy for nested destructuring.  Ideally,
+we'd like to preserve the destructuring forms, and broaden 
+the compiler's knowledge on how to emit efficient code in the
+face of type information (to included nested types):
+
+For an initial cut, we define the =with-slots= macro to
+establish bindings that respect type hints but act like
+=let= bindings for destructuring purposes.
+
+** structural.core/with-slots
 Allows for efficient, type-based destructuring similar to the
 idiomatic destructuring forms of Clojure, with some limitations.
 Bindings are presented as the typical vector, with an even number of
@@ -58,21 +107,82 @@ It's common to import the symbols for the
 
 An example:
 
+By default, structural will warn us if we're dispatching to slow
+operations inside a =with-slots= invocation, and how to help hint stuff:
 #+BEGIN_SRC clojure  
+structural.core> (let [m {:a 2 :b 3}] (with-slots [{:keys [a b]} m] a))
+[:with-slots.warning/using-generic 
+  :get :ns #namespace[structural.core] 
+  :fields {:keys [a b]} :coll m :try-hinting [clojure.lang Associative IPersistentMap java.util.Map]]
+2
+#+END_SRC
+
+If we follow the directives, we can get rid of the warning:
+#+BEGIN_SRC clojure  
+structural.core> (let [m {:a 2 :b 3}] (with-slots [{:keys [a b]} ^clojure.lang.IPersistentMap m] a))
+2
+#+END_SRC
+
+No warnings this time, and if we look at the macroexpansion:
+#+BEGIN_SRC clojure  
+structural.core> (use 'clojure.pprint)
+nil
+structural.core> (binding [*print-meta* true] 
+                      (pprint (macroexpand-1 '(with-slots [{:keys [a b]} ^clojure.lang.IPersistentMap m] a))))
+(clojure.core/let
+ [^clojure.lang.IPersistentMap coll18242
+  ^clojure.lang.IPersistentMap m
+  a
+  (.valAt ^clojure.lang.IPersistentMap coll18242 :a)
+  b
+  (.valAt ^clojure.lang.IPersistentMap coll18242 :b)]
+ a)
+#+END_SRC
+
+#+BEGIN_SRC clojure  
+(ns blah
+ (:import [clojure.lang Indexed Counted])
+;;a botmove is a pair of vectors...hints aren't explicitly
+;;necessary, but we'll use them here for edification:
+(defrecord botmove [^clojure.lang.IPersistentVector path
+                    ^clojure.lang.IPersistentVector position])
+
 (with-slots
+;;the :fields key allows us to define type-hinted method invocations
   [{:fields [^Counted path
              ^Indexed position]} ^botmove (->botmove [] [1 2])
+;;literal structures are automatically hinted; in this case
+;;we efficient destructure :keys into .valAt calls, and :fields
+;;into a hinted .hashCode
    {:keys [a b] :fields [hashCode]}    {:a 2 :b 3}
+;;Vectors expand into (ideally) hinted calls to .nth.  Since we've
+;;hinted position as ^Indexed
    [x y]          position         
    path-length   (.count path)]
  [hashCode (+ x y)])
 #+END_SRC
 
-This provided a way to tune performance without deviating too far from
+This provides a way to tune performance without deviating too far from
 Clojure idioms, and provides warnings when the caller is entering a
 slow path (e.g. causing a function call to get or nth).  It's
 basically a poor man's optimizing compiler for the use-case of
 unpacking type-hinted structures for efficient reads.
+
+
+
+* TODO
+Currently, the hinting is directly focused on interop.  Thus you
+are somewhat tied to the whatever the platform's implementation 
+denotes (e.g. clojure.lang for CLJ jvm).  This is a bit brittle,
+and will likely be extended to support a generic ^counted and ^indexed
+hint that will dispatch to the appropriate platform-specific backend 
+(e.g. protocols in cljs).  
+
+I'd also like to leverage far more sophisticated analyzer support,
+rather than the current janky code-walker macrology.  We should
+be able to have a much more elegant set of definitions that can
+flow types and hints.  Also, provide optional replacements for
+=defn= =fn= =let= and any other binding forms.
 
 ** License
 
