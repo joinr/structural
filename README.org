@@ -14,8 +14,8 @@ This is particularly important for code that lives on
 a hot loop, where (idiomatic) forms like
 
 * installation
-[[https://img.shields.io/clojars/v/structural.svg]]]]
-[[[https://clojars.org/structural]] Clojars Project]
+[[https://img.shields.io/clojars/v/structural.svg]]
+[[https://clojars.org/structural]]
 
 Add the current version from clojars to your project.clj or deps.edn.
 
