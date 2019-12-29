@@ -210,7 +210,44 @@ slow path (e.g. causing a function call to get or nth).  It's
 basically a poor man's optimizing compiler for the use-case of
 unpacking type-hinted structures for efficient reads.
 
+The genesis of this library was actually for performance optimizing
+an ICPFC competition entry.  The following examples are naive, but
+illustrative (a more involved setup would use criterium):
 
+#+BEGIN_SRC clojure  
+structural.core> (defn add [[x y]] (+ x y))
+structural.core> (time (dotimes [i 10000000] (add [1 2])))
+"Elapsed time: 140.237211 msecs"
+#+END_SRC 
+
+#+BEGIN_SRC clojure  
+structural.core> (defn add2 [v] (with-slots [[x y]  ^Indexed v] (+ x y)))
+#'structural.core/add2
+structural.core> (time (dotimes [i 10000000] (add2 [1 2])))
+"Elapsed time: 86.436209 msecs"
+#+END_SRC
+
+#+BEGIN_SRC clojure  
+structural.core> (defn add3 [v] (with-slots [{:fields [x y]}  ^xy v] (+ x y)))
+#'structural.core/add3
+structural.core> (time (dotimes [i 10000000] (add3 (->xy 1 2))))
+"Elapsed time: 29.117979 msecs"
+#+END_SRC
+
+* Intended Uses
+This is broadly useful for any destructuring code, but will likely be most
+useful and practical for highly destructured code paths that happen
+to fall on hot paths indicated by profiling.  There's no reason the
+clojure compiler (or a variant using core.analyzer) couldn't leverage
+this type of performance analysis directly too.  It's probably best
+to go with stock destructuring, and treat this as another optimization
+step after testing.
+
+One area that really benefits is the field-based destructuring.  At a 
+language level, Clojure doesn't have this at all.  Being able to flow
+hints and unpack fields is extremely useful when trying to manage performance,
+particularly when leveraging interop and direct field access from 
+records and types.
 
 * TODO
 Currently, the hinting is directly focused on interop.  Thus you
