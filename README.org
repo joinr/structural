@@ -13,12 +13,40 @@ to have clojure just efficiently unpack our structures.
 This is particularly important for code that lives on
 a hot loop, where (idiomatic) forms like
 
+* installation
+[[https://img.shields.io/clojars/v/structural.svg]]]]
+[[[https://clojars.org/structural]] Clojars Project]
+
+Add the current version from clojars to your project.clj or deps.edn.
+
+#+BEGIN_SRC clojure
+(ns blah 
+  (:require [structural.core :as s])
+  (:import [clojure.lang Indexed Counted IPersistentMap]))
+
+(defprotocol IBlah 
+ (blah [this]))
+
+(defrecord point [^long x ^long y]
+   IBlah
+   (blah [_] (+ x y)))
+
+(s/with-slots [[^IPersistentMap m ^Indexed v ^point p]  [{:a 2 :b 3} [4 5 6] (->point 1 2)]
+               {:fields [count] :keys [a b]}       m
+               [c d e]                             v
+               {:fields [x y blah]}                p]
+  (+ a b c d e blah count))
+#+END_SRC 
+
+* Intro
+Functions like:
+
 #+BEGIN_SRC clojure
 (defn add [[x y]]
   (+ x y))
 #+END_SRC 
 
-will incur a non-trivial cost in destructuring, as 
+will incur a cost in destructuring, as 
 the code will expand to something like...
 #+BEGIN_SRC clojure
 (defn add [xy]
