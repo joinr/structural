@@ -1,0 +1,90 @@
+* structural
+
+A Clojure library designed to ... well, that part is up to you.
+
+** Usage
+
+** icfpc.speed/with-slots
+Allows for efficient, type-based destructuring similar to the
+idiomatic destructuring forms of Clojure, with some limitations.
+Bindings are presented as the typical vector, with an even number of
+entries, where the preceding odd binding establishes binds for the
+even successor.  Unlike typical forms, bindings leverage
+type-hinting information - both on the left hand side and the right
+hand side - to establish efficient operations beyond the generic
+destructuring forms established with maps and vectors, e.g. get and
+nth.
+
+Callers may use {:fields [a b ^clojure.lang.Counted c] }, along with
+a type-hinted rhs, to denote establishing bindings for a, b, c, by
+invoking like-named direct, type-hinted field applications on the
+rhs, ala (.a ^some-type rhs).
+
+Any binding var hinted on the LHS will propogate its hint throughout
+later bindings.  This allows an expressive form of efficient
+destructuring for the consenting adult, which allows idiomatic
+expressivity without the accompanying significant loss of
+performance.
+
+map destructuring for {:keys [...]} follows that of :fields, except
+the bindings are established via either a (.valAt ..) or (.get ..)
+or (get ...) depending on the presented type, get being the fallback.
+This allows usage with types supporting the java.util.Map interface.
+Literal maps are automatically inferred with efficient getters.
+
+Vector or indexed destructuring is similarly supported,
+[^some-type x y] ^clojure.lang.Indexed coll will invoke efficient
+.nth indexing operations rather than the slower, more general nth.
+Depending on the presented type, either .nth, .get, or nth will be
+used, allowing operation with structures supporting the
+java.util.List interface.  Literal vectors are automatically
+inferred with efficient getters.  The & rest notation is currently
+NOT supported...
+
+The remaining rules act identically to let semantics.  If a symbol
+is bound to the LHS, then the binding is passed through
+untouched (including hints).
+
+with-slots tries to scan the input bindings to find
+discrepancies (such as duplicate binds), and to re-use existing
+hinted information for binds.  In the case that the user decides to
+re-hint a RHS var that has already been hinted a-priori, with-slots
+will allow the hint for that binding, but revert to prior hinting
+unless the user continues to specify new hints.  This seems rare in
+practice.
+
+It's common to import the symbols for the
+[clojure.lang Counted Indexed] interfaces when using with-slots.
+
+An example:
+
+#+BEGIN_SRC clojure  
+(with-slots
+  [{:fields [^Counted path
+             ^Indexed position]} ^botmove (->botmove [] [1 2])
+   {:keys [a b] :fields [hashCode]}    {:a 2 :b 3}
+   [x y]          position         
+   path-length   (.count path)]
+ [hashCode (+ x y)])
+#+END_SRC
+
+This provided a way to tune performance without deviating too far from
+Clojure idioms, and provides warnings when the caller is entering a
+slow path (e.g. causing a function call to get or nth).  It's
+basically a poor man's optimizing compiler for the use-case of
+unpacking type-hinted structures for efficient reads.
+
+** License
+
+Copyright © 2019 joinr
+
+This program and the accompanying materials are made available under the
+terms of the Eclipse Public License 2.0 which is available at
+http://www.eclipse.org/legal/epl-2.0.
+
+This Source Code may also be made available under the following Secondary
+Licenses when the conditions for such availability set forth in the Eclipse
+Public License, v. 2.0 are satisfied: GNU General Public License as published by
+the Free Software Foundation, either version 2 of the License, or (at your
+option) any later version, with the GNU Classpath Exception which is available
+at https://www.gnu.org/software/classpath/license.html.
