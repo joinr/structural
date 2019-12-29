@@ -4,14 +4,15 @@ This is a small library that provides macros to help
 convert destructured code into efficient code via type hints.
 
 One of the big problems one runs into in practice is that
-the expressivenss of destructuring - while elegant - typically
+the expressiveness of destructuring - while elegant - typically
 renders inefficient code from the clojure compiler.  The default
 is more generic, polymorphic code.  If we know the types and 
 are willing to hint to optimize for performance, we'd like
 to have clojure just efficiently unpack our structures.
 
 This is particularly important for code that lives on
-a hot loop, where (idiomatic) forms like
+a hot loop, where (idiomatic) forms can lead to 
+a "death by a thousand cuts" situation.
 
 * installation
 [[https://img.shields.io/clojars/v/structural.svg]]
@@ -59,7 +60,7 @@ where =clojure.core/nth= is polymorphic and has to run through several
 tests to determine what the input is and how to coerce it to 
 an appropriate operation for indexed lookup.
 
-A much faster route would be something like..
+A faster route would be something like..
 #+BEGIN_SRC clojure
 (defn add [^clojure.lang.Indexed xy]
   (let [x (.nth xy 0)
@@ -69,7 +70,7 @@ A much faster route would be something like..
 
 wherein we know the type of the input will always be something
 supporting Indexed, thus supporting the =.nth= method, thus something
-we can to the compiler to emit a direct method invocation directly.
+we can to the compiler to emit a direct method invocation.
 
 For smallish function optimizations, this isn't too bad, but
 it can get hairy for nested destructuring.  Ideally,
