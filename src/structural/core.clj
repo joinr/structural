@@ -72,14 +72,20 @@
     (fn [coll k]
       `(~f ~coll ~k))))
 
+;;add support for
+;; (let [{hello :hello blah :world} {:hello "tom" :world 2}]
+;;   [hello blah])
+
 (defn slot-binds
   ([coll get-slot flds]
-   (flat-binds
-    (for [[idx f] (map-indexed vector flds)
-          :when (not= f '_)]
-      `[~f ~(get-slot coll idx)])))
+   (let [[xs & [_ [as & rest]]] (partition-by #{:as} flds)]
+     (flat-binds
+      (concat (for [[idx f] (map-indexed vector xs)
+                    :when (not= f '_)]
+                `[~f ~(get-slot coll idx)])
+              (when as [`[~as ~coll]])))))
   ([coll flds]
-   (let [tag (-> coll meta :tag)
+   (let [tag (:-> coll meta :tag)
          getter (slot-getter (eval (or tag 'Object)))]
      (slot-binds coll getter  flds))))
 
@@ -132,9 +138,10 @@
                 (when @warn-on-generic
                   (generic-warning fields coll))
                 `[~fields ~coll])
+            ;;maps have associative destructuring...
             (map? fields) ;;{:keys flds :as something}
             (let [flds   (get fields :fields)
-                  ks     (get fields :keys)
+                  ks     (get fields :keys) ;;maybe overload this?
                   _      (ensure-distinct flds ks)
                   tgt    (when-let [res (get fields :as)]
                            (if (-> res meta :tag)
@@ -196,6 +203,39 @@
                                      re-use?     (as-binds r l r)
                                      :else       (as-binds l r)))))]
     res))
+
+(def coll-re #"coll[0-9]+")
+(defn coll-sym? [x]
+  (re-find coll-re  (name x)))
+
+;;we need to establish a final pass to eliminate needless bindings,
+;;since bindings still cost...
+
+;;given
+;; [^clojure.lang.Indexed coll14941
+;;  ^clojure.lang.Indexed assign-result
+;;  board
+;;  (.nth ^clojure.lang.Indexed coll14941 0)
+;;  aff-indexes
+;;  (.nth ^clojure.lang.Indexed coll14941 1)]
+
+(defn dupe? [l r]
+  (and (symbol? l) (symbol? r)
+       (= (name l) (name r))
+       (= (-> l meta :tag) (-> r meta :tag))))
+
+(defn collapse-binds [xs]
+  (let [replacements (atom {})]
+    (reduce (fn [acc [l r]]
+              (cond (and (coll-sym? l) (symbol? r))
+                      (do (swap! replacements assoc l r)
+                          acc)
+                    (dupe? l r)
+                      acc
+                    :else
+                      (conj acc l (w/postwalk-replace @replacements r))))
+            []
+            (partition 2 xs))))
 
 (defmacro with-slots
   "Allows for efficient, type-based destructuring similar to the
@@ -261,7 +301,6 @@
   "
   [bindings & body]
   (let [[_ bindings & body] &form]
-    `(let [~@(unify-binds bindings)]
+    `(let [~@(collapse-binds (unify-binds bindings))]
        ~@body)))
-
 
