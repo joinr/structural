@@ -1,4 +1,5 @@
-(ns structural.core)
+(ns structural.core
+  (:require [clojure.walk :as w]))
 ;;let's define some macros that let us leverage type hints, unpack
 ;;destructured vectors, and other goodies that allow us to use extant
 ;;expressive code, but apply significant optimizations that add up on
