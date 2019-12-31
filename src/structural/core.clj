@@ -86,7 +86,7 @@
                 `[~f ~(get-slot coll idx)])
               (when as [`[~as ~coll]])))))
   ([coll flds]
-   (let [tag (:-> coll meta :tag)
+   (let [tag (-> coll meta :tag)
          getter (slot-getter (eval (or tag 'Object)))]
      (slot-binds coll getter  flds))))
 
