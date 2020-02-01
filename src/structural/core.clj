@@ -207,7 +207,8 @@
 
 (def coll-re #"coll[0-9]+")
 (defn coll-sym? [x]
-  (re-find coll-re  (name x)))
+  (when (symbol? x)
+    (re-find coll-re  (name x))))
 
 ;;we need to establish a final pass to eliminate needless bindings,
 ;;since bindings still cost...
@@ -304,4 +305,22 @@
   (let [[_ bindings & body] &form]
     `(let [~@(collapse-binds (unify-binds bindings))]
        ~@body)))
+
+
+;;add facility for custom hinting.
+;;for now we bake in...
+;;possibly, we could define structure.
+;;:nth  -> (.nth ^clojure.lang.Indexed coll n)
+;;:nths -> nested nth
+;;:get  -> (.get ^java.util.Map coll k)
+;;:gets -> nested get
+;;:val  -> (.valAt ...)
+;;:vals -> nested valAt
+
+#_(fn [lr xy]
+    (with-slots  [[[lx ly] [rx ry]] ^:nths  lr
+                  [x y]             ^:nths  xy]
+      {:lx  lx :ly ly  :rx rx :ry ry :x x :y y}))
+
+
 
