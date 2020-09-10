@@ -1,5 +1,7 @@
 (ns structural.core
-  (:require [clojure.walk :as w]))
+  (:require [clojure.walk :as w]
+            [structural.types :as types]
+            [clojure.tools.macro :as m]))
 ;;let's define some macros that let us leverage type hints, unpack
 ;;destructured vectors, and other goodies that allow us to use extant
 ;;expressive code, but apply significant optimizations that add up on
@@ -169,12 +171,18 @@
         (vector? l) l
         :else nil))
 
+;;Feels very very dirty using an atom to pass around
+;;type information, but it's happening at compile time,
+;;and it shouldn't be bad.  Only sfn submits type info,
+;;and only with-slots clears it.  Still open to problems
+;;though, but it works!
+(def init-tags (atom nil))
 (defn unify-binds [bindings]
   (let [n       (count bindings)
         _  (assert (and (vector? bindings)
                         (pos? n)
                         (even? n)) "slot bindings must be a vector with an even number of entries!")
-        tags (atom {})
+        tags (atom (or @init-tags {}))
         get-tag (fn [x]
                   (let [k (name x)]
                     (if-let [t (-> x meta :tag)]
@@ -302,25 +310,135 @@
     [hashCode (+ x y)])
   "
   [bindings & body]
-  (let [[_ bindings & body] &form]
-    `(let [~@(collapse-binds (unify-binds bindings))]
+  (let [[_ bindings & body] &form
+        new-bindings (collapse-binds (unify-binds bindings))
+        ;;sorry for the state...
+        _ (reset! init-tags {})]
+    `(let [~@new-bindings]
        ~@body)))
 
+#_
+(defn blah [{:keys [x y]} ])
 
-;;add facility for custom hinting.
-;;for now we bake in...
-;;possibly, we could define structure.
-;;:nth  -> (.nth ^clojure.lang.Indexed coll n)
-;;:nths -> nested nth
-;;:get  -> (.get ^java.util.Map coll k)
-;;:gets -> nested get
-;;:val  -> (.valAt ...)
-;;:vals -> nested valAt
+#_
+(s/fn [^Indexed [dx' dy']]
+  (obstacle? level x y dx' dy'))
 
-#_(fn [lr xy]
-    (with-slots  [[[lx ly] [rx ry]] ^:nths  lr
-                  [x y]             ^:nths  xy]
-      {:lx  lx :ly ly  :rx rx :ry ry :x x :y y}))
+#_
+(fn [dxdy]
+  (with-slots [[dx' dy'] ^Indexed dxdy]
+    (obstacle? level x y dx' dy')))
 
+
+;;infer from the record type would be nice...
+#_
+(s/defn bot-covering [{:fields [^Indexed bots bot] :as ^lev level}]
+  (with-slots
+    [{:keys [^long x ^long y layout]}            ^IPersistentMap (.nth bots bot)]
+    (eduction  (map (fn [dxdy] 
+                      (with-slots [[^long dx ^long dy] ^Indexed dxdy]
+                        (when (or (and (zero? dx) (zero? dy)
+                                       (valid? x y level))
+                                  (valid-hand? x y dx dy level))
+                          [(+ x dx) (+ y dy)]))))
+               (filter identity) layout)))
+
+#_
+(defn bot-covering [level]
+  (with-slots
+    [{:fields [^Indexed bots bot]}   ^lev level
+     {:keys [^long x ^long y layout]}            ^IPersistentMap (.nth bots bot)]
+    (eduction  (map (fn [dxdy] 
+                      (with-slots [[^long dx ^long dy] ^Indexed dxdy]
+                        (when (or (and (zero? dx) (zero? dy)
+                                       (valid? x y level))
+                                  (valid-hand? x y dx dy level))
+                          [(+ x dx) (+ y dy)]))))
+               (filter identity) layout)))
+
+
+;;basic transform of
+#_
+(fn [[unwrapping :as ^hint wrapped]] ;;no :as defined, create :as...
+  (with-slots [more-unrwapping]
+    ...))
+
+#_
+(fn [wrapped]
+  (with-slots [unwrapping ^hint wrapped
+               more-unwrapping ...]))
+
+;;clojure.core/maybe-destructured, EPL v 1.0
+#_
+(defn  maybe-destructured
+  [params body]
+  (if (every? symbol? params)
+    (cons params body)
+    (loop [params params
+           new-params (with-meta [] (meta params))
+           lets []]
+      (if params
+        (if (symbol? (first params))
+          (recur (next params) (conj new-params (first params)) lets)
+          (let [gparam (gensym "p__")]
+            (recur (next params) (conj new-params gparam)
+                   (-> lets (conj (first params)) (conj gparam)))))
+        `(~new-params
+          (let ~lets
+            ~@body))))))
+
+;;let-forms should be expanded to with-slots.
+(defn sfn->fn [nm args & body]
+  (let [head    (first args)]
+    (if-not (or (map? head) (vector? head))
+      ;;don't bother destructuring sequences for now.
+      ;;need to propogate the function arg type though,
+      ;;so that with-slots can pick up on it.
+      (-> `(fn ~args ~@body)
+          (with-meta :init-tags
+            (if  head
+              {(name head) (-> head meta :tag)}
+              {})))
+      (let [t       (-> head meta :tag)
+            as-tgt  (if (map? head)
+                      (head :as)
+                      (let [tgt (some-> (partition-by #{:as} args)
+                                        vec
+                                        (nth 2 nil))
+                            _   (assert (if tgt  (= (count tgt) 1) true)
+                                        "only one symbol allowed for :as in vector!")]
+                        (first tgt)))
+            as?      (some? as-tgt)
+            as-tgt   (with-meta (or as-tgt (gensym "arg")) {:tag t})
+            non-as-binding (if (map? head)
+                             (dissoc head :as)
+                             (filterv (complement #{:as as-tgt}) head))]
+        `(fn ~nm [~as-tgt]
+           (structural.core/with-slots [~non-as-binding ~as-tgt]
+             ~@body))))))
+
+(defmacro sfn
+  "Like clojure.core/fn, except recognizes structural bindings akin to
+   structural.core/with-slots, and treats the arg vector as a structural
+   binding form as well."
+  [name args & body]
+  (let [[_ name args & body] &form
+        t (-> args first meta :tag)
+        f (gensym "form")
+        b (gensym "body")
+        expr (apply sfn->fn name args body)
+        _    (reset! init-tags (or (-> expr meta :init-tags) {}))]
+    `(m/macrolet [(~'let [~f ~'& ~b]
+                   (list* ~''structural.core/with-slots ~f ~b))]
+        ~expr)))
+
+(defmacro sdefn
+  "Like clojure.core/fn, except recognizes structural bindings akin to
+   structural.core/with-slots, and treats the arg vector as a structural
+   binding form as well."
+  [name args & body]
+  (let [[_ name args & body] &form])
+  `(def ~name
+     (sfn ~name ~args ~@body)))
 
 

@@ -32,11 +32,45 @@ Add the current version from clojars to your project.clj or deps.edn.
    IBlah
    (blah [_] (+ x y)))
 
+;;with-slots acts like clojure.core/let, except it's smart
+;;about hinted destructuring, and adds the :fields
+;;key to map-based destructuring to allow binding to 
+;;arbitrary fields/methods on the hinted object.  This
+;;is usually substantially faster than e.g. keyword
+;;lookup on a record.  You can mix keys and fields freeely,
+;;and we'll try to find the most efficient path.
+
+
 (s/with-slots [[^IPersistentMap m ^Indexed v ^point p]  [{:a 2 :b 3} [4 5 6] (->point 1 2)]
                {:fields [count] :keys [a b]}       m
                [c d e]                             v
                {:fields [x y blah]}                p]
   (+ a b c d e blah count))
+
+
+;;The macros sdefn and sfn (names may change) are for 
+;;structural function definitions.  They allow you to write
+;;functions as you would in clojure, with the semantics of 
+;;with-slots applied to the function arguments, and all 
+;;`let` bindings in the body (which are macrolet bound
+;;to convert to `with-slots` invocations).
+
+(s/sdefn add-vector [[^long x ^long y]] 
+  (+ x y))
+
+;; [:with-slots.warning/using-generic :nth :ns
+;; #namespace[examples.core] :fields [x y] :coll
+;; arg16626 :try-hinting [clojure.lang Indexed IPersistentVector
+;; java.util.List]]
+
+(s/sdefn add-vector [^Indexed [^long x ^long y]] 
+  (+ x y))
+
+;If you were to benchmark add-vector, you would notice about a 5.85x
+;;faster runtime compared to stock generic destructuring.
+;;These gains are even more dramatic for records and clojure/java types
+;;with direct field access/methods, where we see around 9-10x improvement
+;;in access times.
 #+END_SRC 
 
 * Intro
@@ -263,6 +297,24 @@ structural.core> (time (dotimes [i 10000000] (add3 (->xy 1 2))))
 "Elapsed time: 29.117979 msecs"
 #+END_SRC
 
+** structural.core/sfn, sdefn
+Analagous to clojure.core/fn and defn, they are convenience wrappers
+to extend the semantics of ~with-slots~ to functions definitions.
+They also rewrite ~let~ into ~with-slots~ forms (where the default 
+common form of ~with-slots~ is equivalent to clojure's ~let~ exactly,
+except it will emit (optional) warnings about potential slow access paths.
+
+The equivalent function example from the previous section would be:
+#+BEGIN_SRC clojure
+(structural.core/sdefn add3 [^xy {:fields [x y]}] 
+  (+ x y))
+#+END_SRC 
+Clojure destructuring idioms like ~:as~ should work out of the box; 
+behavior for ~:or~ is currently undefined....
+
+At the time of writing, only *single* function bodies are supported,
+although it should trivial to extend to multiple function bodies.
+
 * Intended Uses
 This is broadly useful for any destructuring code, but will likely be most
 useful and practical for highly destructured code paths that happen
@@ -289,8 +341,11 @@ hint that will dispatch to the appropriate platform-specific backend
 I'd also like to leverage far more sophisticated analyzer support,
 rather than the current janky code-walker macrology.  We should
 be able to have a much more elegant set of definitions that can
-flow types and hints.  Also, provide optional replacements for
-=defn= =fn= =let= and any other binding forms.
+flow types and hints.  
+
+Add efficient typed array destructuring akin to vector/nth stuff.
+
++Also, provide optional replacements for =defn= =fn= =let= and any other binding forms.+
 
 ** License
 
